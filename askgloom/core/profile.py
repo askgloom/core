@@ -1,164 +1,185 @@
 """
-Browser profile management for Ask Gloom Core.
-Handles profile creation, loading, and configuration.
+Configuration management for Ask Gloom Core.
+Handles loading, saving, and validating configuration settings.
 """
 
 import os
 import json
-import shutil
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Optional
 from pathlib import Path
-from ..exceptions.core_exceptions import ProfileException
+from ..exceptions.core_exceptions import ConfigurationException
 
 logger = logging.getLogger(__name__)
 
-class Profile:
+class Config:
     """
-    Manages browser profiles including preferences, extensions, and cookies.
+    Manages configuration settings for Ask Gloom Core.
+    Supports both global and local configurations.
     """
 
-    def __init__(
-        self,
-        profile_path: Optional[str] = None,
-        create_if_missing: bool = True
-    ):
-        """
-        Initialize profile manager.
-
-        Args:
-            profile_path (str, optional): Path to profile directory
-            create_if_missing (bool): Create profile if it doesn't exist
-        """
-        self.path = profile_path or self._get_default_profile_path()
-        self.preferences: Dict[str, Any] = {}
-        
-        if create_if_missing:
-            self._ensure_profile_exists()
-        
-        self.load_profile()
-
-    def _get_default_profile_path(self) -> str:
-        """Get default profile path based on OS."""
-        home = Path.home()
-        
-        if os.name == 'nt':  # Windows
-            return str(home / 'AppData' / 'Local' / 'AskGloom' / 'Profiles' / 'Default')
-        else:  # Unix-like
-            return str(home / '.config' / 'askgloom' / 'profiles' / 'default')
-
-    def _ensure_profile_exists(self) -> None:
-        """Create profile directory structure if it doesn't exist."""
-        try:
-            profile_dir = Path(self.path)
-            
-            # Create main profile directory
-            profile_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Create subdirectories
-            (profile_dir / 'Extensions').mkdir(exist_ok=True)
-            (profile_dir / 'Cache').mkdir(exist_ok=True)
-            
-            # Create default preferences if they don't exist
-            prefs_file = profile_dir / 'Preferences'
-            if not prefs_file.exists():
-                self._create_default_preferences(prefs_file)
-                
-            logger.debug(f"Profile directory structure created at {self.path}")
-            
-        except Exception as e:
-            logger.error(f"Failed to create profile directory: {str(e)}")
-            raise ProfileException(f"Profile creation failed: {str(e)}")
-
-    def _create_default_preferences(self, prefs_file: Path) -> None:
-        """Create default preferences file."""
-        default_prefs = {
-            "profile": {
-                "name": "Default",
-                "created_at": "",  # Will be set when saving
+    DEFAULT_CONFIG = {
+        "browser": {
+            "default_profile": "default",
+            "headless": False,
+            "window_size": {
+                "width": 1920,
+                "height": 1080
             },
-            "browser": {
-                "window_size": {
-                    "width": 1920,
-                    "height": 1080
-                },
-                "startup_page": "about:blank",
-                "download_path": str(Path(self.path) / "Downloads")
-            },
-            "privacy": {
-                "clear_on_exit": False,
-                "block_third_party_cookies": True
-            }
+            "user_agent": None,
+            "timeout": 30
+        },
+        "profiles": {
+            "location": None,  # Will be set based on OS
+            "create_on_start": True
+        },
+        "logging": {
+            "level": "INFO",
+            "file": None,
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        },
+        "automation": {
+            "wait_time": 5,
+            "retry_attempts": 3,
+            "screenshot_on_error": True
         }
-        
-        self.save_preferences(default_prefs)
+    }
 
-    def load_profile(self) -> None:
-        """Load profile preferences and settings."""
-        try:
-            prefs_file = Path(self.path) / 'Preferences'
-            if prefs_file.exists():
-                with open(prefs_file, 'r', encoding='utf-8') as f:
-                    self.preferences = json.load(f)
-                logger.debug("Profile preferences loaded successfully")
-            else:
-                logger.warning("No preferences file found, using defaults")
-                self._create_default_preferences(prefs_file)
-                
-        except Exception as e:
-            logger.error(f"Failed to load profile: {str(e)}")
-            raise ProfileException(f"Profile loading failed: {str(e)}")
-
-    def save_preferences(self, preferences: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, config_path: Optional[str] = None):
         """
-        Save preferences to profile directory.
+        Initialize configuration manager.
 
         Args:
-            preferences (Dict[str, Any], optional): Preferences to save
+            config_path (str, optional): Path to configuration file
+        """
+        self.config_path = config_path or self._get_default_config_path()
+        self.config: Dict[str, Any] = {}
+        self.load_config()
+
+    def _get_default_config_path(self) -> str:
+        """Get default configuration file path based on OS."""
+        if os.name == 'nt':  # Windows
+            config_dir = Path(os.getenv('APPDATA')) / 'AskGloom'
+        else:  # Unix-like
+            config_dir = Path.home() / '.config' / 'askgloom'
+
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return str(config_dir / 'config.json')
+
+    def load_config(self) -> None:
+        """Load configuration from file or create default."""
+        try:
+            config_file = Path(self.config_path)
+            
+            if config_file.exists():
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    loaded_config = json.load(f)
+                    # Merge with defaults to ensure all required fields exist
+                    self.config = self._merge_configs(self.DEFAULT_CONFIG, loaded_config)
+                logger.debug("Configuration loaded successfully")
+            else:
+                logger.info("No configuration file found, creating default")
+                self.config = self.DEFAULT_CONFIG.copy()
+                self._set_os_specific_defaults()
+                self.save_config()
+
+        except Exception as e:
+            logger.error(f"Failed to load configuration: {str(e)}")
+            raise ConfigurationException(f"Configuration loading failed: {str(e)}")
+
+    def _set_os_specific_defaults(self) -> None:
+        """Set OS-specific default values."""
+        if os.name == 'nt':  # Windows
+            profiles_location = str(Path(os.getenv('LOCALAPPDATA')) / 'AskGloom' / 'Profiles')
+        else:  # Unix-like
+            profiles_location = str(Path.home() / '.config' / 'askgloom' / 'profiles')
+
+        self.config['profiles']['location'] = profiles_location
+
+    def _merge_configs(self, default: Dict, custom: Dict) -> Dict:
+        """
+        Recursively merge custom config with defaults.
+        
+        Args:
+            default (Dict): Default configuration
+            custom (Dict): Custom configuration to merge
+            
+        Returns:
+            Dict: Merged configuration
+        """
+        result = default.copy()
+        
+        for key, value in custom.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._merge_configs(result[key], value)
+            else:
+                result[key] = value
+                
+        return result
+
+    def save_config(self) -> None:
+        """Save current configuration to file."""
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, indent=4)
+            logger.debug("Configuration saved successfully")
+        except Exception as e:
+            logger.error(f"Failed to save configuration: {str(e)}")
+            raise ConfigurationException(f"Configuration saving failed: {str(e)}")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value by key.
+        
+        Args:
+            key (str): Configuration key (dot notation supported)
+            default (Any): Default value if key not found
+            
+        Returns:
+            Any: Configuration value
         """
         try:
-            if preferences is not None:
-                self.preferences = preferences
+            value = self.config
+            for k in key.split('.'):
+                value = value[k]
+            return value
+        except (KeyError, TypeError):
+            return default
+
+    def set(self, key: str, value: Any, save: bool = True) -> None:
+        """
+        Set configuration value.
+        
+        Args:
+            key (str): Configuration key (dot notation supported)
+            value (Any): Value to set
+            save (bool): Whether to save to file immediately
+        """
+        try:
+            keys = key.split('.')
+            current = self.config
+            
+            # Navigate to the correct nested level
+            for k in keys[:-1]:
+                if k not in current:
+                    current[k] = {}
+                current = current[k]
                 
-            prefs_file = Path(self.path) / 'Preferences'
-            with open(prefs_file, 'w', encoding='utf-8') as f:
-                json.dump(self.preferences, f, indent=4)
+            # Set the value
+            current[keys[-1]] = value
+            
+            if save:
+                self.save_config()
                 
-            logger.debug("Profile preferences saved successfully")
+            logger.debug(f"Configuration updated: {key} = {value}")
             
         except Exception as e:
-            logger.error(f"Failed to save preferences: {str(e)}")
-            raise ProfileException(f"Failed to save preferences: {str(e)}")
+            logger.error(f"Failed to set configuration: {str(e)}")
+            raise ConfigurationException(f"Failed to set configuration value: {str(e)}")
 
-    def delete(self) -> None:
-        """Delete profile directory and all contents."""
-        try:
-            shutil.rmtree(self.path)
-            logger.info(f"Profile deleted: {self.path}")
-        except Exception as e:
-            logger.error(f"Failed to delete profile: {str(e)}")
-            raise ProfileException(f"Profile deletion failed: {str(e)}")
-
-    def get_extension_path(self, extension_id: str) -> str:
-        """
-        Get path to specific extension.
-
-        Args:
-            extension_id (str): Extension ID
-
-        Returns:
-            str: Path to extension directory
-        """
-        return str(Path(self.path) / 'Extensions' / extension_id)
-
-    def clear_cache(self) -> None:
-        """Clear profile cache."""
-        try:
-            cache_dir = Path(self.path) / 'Cache'
-            if cache_dir.exists():
-                shutil.rmtree(cache_dir)
-                cache_dir.mkdir()
-            logger.debug("Profile cache cleared")
-        except Exception as e:
-            logger.error(f"Failed to clear cache: {str(e)}")
-            raise ProfileException(f"Cache clearing failed: {str(e)}")
+    def reset(self) -> None:
+        """Reset configuration to defaults."""
+        self.config = self.DEFAULT_CONFIG.copy()
+        self._set_os_specific_defaults()
+        self.save_config()
+        logger.info("Configuration reset to defaults")
