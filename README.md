@@ -7,7 +7,6 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/gloom-core.svg)](https://pypi.org/project/gloom-core/)
 [![PyPI version](https://badge.fury.io/py/gloom-core.svg)](https://badge.fury.io/py/gloom-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://github.com/ask-gloom/gloom-core/actions/workflows/tests.yml/badge.svg)](https://github.com/ask-gloom/gloom-core/actions/workflows/tests.yml)
 
 </div>
 
