@@ -1,4 +1,3 @@
-```markdown
 ![Gloom Core](https://raw.githubusercontent.com/askgloom/.github/refs/heads/main/images/banner.png)
 
 # Gloom Core
